@@ -21,23 +21,27 @@ app.use(function (req, res, next) {
 
 import db from "./dbConnect.mjs";
 
-var prices;
+let date_ob = new Date();
 
-const source1 = (from, to, amount) => {
+let date = ("0" + date_ob.getDate()).slice(-2);
+let month = ("0" + (date_ob.getMonth() + 1)).slice(-2);
+let year = date_ob.getFullYear();
+let hours = date_ob.getHours();
+let minutes = date_ob.getMinutes();
+let seconds = date_ob.getSeconds();
+
+const source1 = async (from, to, amount) => {
   const key = "8741d8253924eeaccbabc655bdacdd680234d102";
 
   const url = `https://api.getgeoapi.com/v2/currency/convert?api_key=${key}&from=${from}
   &to=${to}&amount=${amount}&format=json`;
 
-  fetch(url)
-    .then((response) => response.json())
-    .then((data) => {
-      const dbMongo = db;
-      dbMongo.collection("rescentRequest").insertOne(data, function (err, res) {
-        if (err) throw err;
-      });
-      res.send(data);
-    });
+  try {
+    let response = await fetch(url);
+    return response.json();
+  } catch {
+    (err) => console.error(err);
+  }
 };
 
 const source2 = async (from, to, amount) => {
@@ -80,14 +84,63 @@ const source3 = async (from, to, amount) => {
 
 app.post("/convert", async (req, res) => {
   let { from, to, amount } = req.body;
+  let links = [
+    "https://api.getgeoapi.com",
+    "https://v6.exchangerate-api.com",
+    "https://api.apilayer.com",
+  ];
   let prices = [0];
   let resource1 = await source1(from, to, amount);
   let resource2 = await source2(from, to, amount);
   let resource3 = await source3(from, to, amount);
-  prices[0] = resource2.conversion_rate;
-  prices[1] = resource3.info.rate;
+
+  prices[0] = parseFloat(resource1.rates[to].rate);
+  prices[1] = resource2.conversion_rate;
+  prices[2] = resource3.info.rate;
+
   let min_rate = Math.min(...prices);
   let max_rate = Math.max(...prices);
+
+  let i = prices.indexOf(min_rate);
+  let j = prices.indexOf(max_rate);
+
+  let min_source = links[i];
+  let max_source = links[j];
+
+  let min_amount = min_rate * amount;
+  let max_amount = max_rate * amount;
+
+  let time =
+    year +
+    "-" +
+    month +
+    "-" +
+    date +
+    " " +
+    hours +
+    ":" +
+    minutes +
+    ":" +
+    seconds;
+  let backendData = {
+    timeStamp: time,
+    from: from,
+    to: to,
+    min_rate: min_rate,
+    min_source: min_source,
+    min_amount: min_amount,
+    max_rate: max_rate,
+    max_source: max_source,
+    max_amount: max_amount,
+  };
+
+  const dbMongo = db;
+  dbMongo
+    .collection("rescentRequest")
+    .insertOne(backendData, function (err, res) {
+      if (err) throw err;
+    });
+  res.send(backendData);
 });
 
 app.get("/rescentRequest", async (req, res) => {
